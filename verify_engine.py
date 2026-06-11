@@ -41,15 +41,27 @@ def run_tests():
     in_tensor = np.expand_dims(in_tensor, axis=0)
     assert in_tensor.shape == (1, 3, model_h, model_w), "Input shape mismatch"
     print("  Pre-processing shape correct:", in_tensor.shape)
-    
     # Run test inference
     model_inputs = {session.get_inputs()[0].name: in_tensor}
     model_outputs = session.run(None, model_inputs)
     assert len(model_outputs) > 0, "No outputs from ONNX run"
     print("  ONNX model run test passed successfully.")
+    
+    # Test Custom CV Styles on StreamA
+    from src.utils import DoubleBuffer
+    from src.stream_a import StreamA
+    dummy_in = DoubleBuffer()
+    dummy_out = DoubleBuffer()
+    stream_a_test = StreamA(dummy_in, dummy_out)
+    
+    for style in ["Cartoon", "Oil Pastel Painting", "ASCII Character Vision", "Line Drawing"]:
+        print(f"  Testing CV style processing for '{style}'...")
+        tex = stream_a_test.apply_cv_style(dummy_frame, style)
+        assert tex.shape == (config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), f"CV style output shape mismatch for {style}"
+        print(f"    Passed '{style}'")
 
-    # 3. Test Engine Initialization and Reseeding
-    print("3. Testing Rendering Engine and Particle updates...")
+    # 3. Test Engine Initialization, Reseeding, and Style drawing
+    print("3. Testing Rendering Engine and Particle updates for all styles...")
     engine = VectorRenderingEngine()
     assert len(engine.x) == config.MAX_PARTICLE_COUNT, "Particle arrays pre-allocation failed"
     print(f"  Pre-allocated {config.MAX_PARTICLE_COUNT} particles successfully.")
@@ -60,15 +72,18 @@ def run_tests():
         "edge_magnitude": np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH), dtype=np.float32),
         "edge_angle": np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH), dtype=np.float32),
         "saliency": np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH), dtype=np.float32),
-        "gray": np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH), dtype=np.uint8)
+        "gray": np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH), dtype=np.uint8),
+        "color": np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), dtype=np.uint8)
     }
     stylized_texture = np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), dtype=np.uint8)
     
-    # Run a single engine update step
-    engine.update(control_matrices, stylized_texture)
-    canvas = engine.draw()
-    assert canvas.shape == (config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), "Canvas rendering shape mismatch"
-    print("  Engine update & draw runs successfully without crash.")
+    # Run a single engine update step for every style
+    for style in config.ALL_STYLES:
+        print(f"  Testing update & draw for style '{style}'...")
+        engine.update(control_matrices, stylized_texture, style_name=style)
+        canvas = engine.draw()
+        assert canvas.shape == (config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), f"Canvas rendering shape mismatch for {style}"
+        print(f"    Passed '{style}'")
     
     print("\nALL OFFLINE TESTS PASSED SUCCESSFULLY!")
 

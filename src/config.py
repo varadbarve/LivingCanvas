@@ -23,6 +23,17 @@ STYLE_MODELS = {
     "Modernist Geometric": "candy-9.onnx"
 }
 
+# All Available Styles
+ALL_STYLES = [
+    "Starry Night",
+    "The Scream",
+    "Modernist Geometric",
+    "ASCII Character Vision",
+    "Cartoon",
+    "Oil Pastel Painting",
+    "Line Drawing"
+]
+
 STYLE_MODEL_URLS = {
     "rain-princess-9.onnx": "https://huggingface.co/onnxmodelzoo/rain-princess-9/resolve/main/rain-princess-9.onnx",
     "FNS-The-Scream.onnx": "https://raw.githubusercontent.com/ChangweiZhang/Awesome-ONNX-Models/master/FNS-The-Scream.onnx",

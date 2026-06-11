@@ -162,4 +162,12 @@ Thumbs.db
 *.swo
 
 # Downloaded model weights (Large ONNX binaries)
-models/*.onnx
+models/
+
+# Media outputs (recordings, screenshots, frames)
+*.mp4
+*.avi
+*.png
+*.jpg
+*.jpeg
+*.webp

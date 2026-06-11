@@ -66,7 +66,7 @@ class LivingCanvasUI:
         style_cb = ttk.Combobox(
             style_frame, 
             textvariable=self.active_style, 
-            values=list(config.STYLE_MODELS.keys()),
+            values=config.ALL_STYLES,
             state="readonly"
         )
         style_cb.pack(fill=tk.X, pady=5)
@@ -212,7 +212,7 @@ class LivingCanvasUI:
         else:
             # Artistic simulation view
             if control_matrices is not None:
-                self.engine.update(control_matrices, stylized_texture)
+                self.engine.update(control_matrices, stylized_texture, self.active_style.get())
                 render_img = self.engine.draw()
                 
         # 3. Draw image onto Tkinter canvas
