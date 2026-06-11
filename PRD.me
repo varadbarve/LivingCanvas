@@ -1,0 +1,400 @@
+# The Living Canvas
+### A Real-Time Generative Video-to-Vector Art Pipeline
+
+## Overview
+
+The Living Canvas is a real-time interactive graphics system that transforms a live webcam feed into a dynamic, physics-based vector art simulation. Instead of treating video as a collection of pixels, the system interprets each frame as a fluid canvas where virtual brushstrokes respond to motion, edges, and visual saliency.
+
+The project combines Computer Vision, Digital Signal Processing, and Lightweight Neural Style Transfer to create a responsive artistic experience capable of running on consumer-grade hardware at real-time frame rates.
+
+Source: Product Requirements Document. :contentReference[oaicite:0]{index=0}
+
+---
+
+## Key Features
+
+- Real-time Neural Style Transfer
+- Dense Optical Flow-Based Paint Smearing
+- Saliency-Based Adaptive Brush Rendering
+- Edge-Aware Stroke Orientation
+- Physics-Inspired Brush Dynamics
+- Multi-Threaded Processing Pipeline
+- Engineering Dashboard with Diagnostics
+- 30+ FPS Real-Time Performance
+
+---
+
+## System Architecture
+
+The system follows a Dual-Stream Engine architecture.
+
+```text
+                  Camera Input
+                        |
+          +-------------+-------------+
+          |                           |
+          v                           v
+
+   Stream A                     Stream B
+ (Semantic AI)              (Geometric CV)
+
+ Style Transfer          Optical Flow
+ Texture Mapping         Edge Detection
+ Color Mood              Saliency Analysis
+
+          +-------------+-------------+
+                        |
+                        v
+               Tensor Fusion Layer
+                        |
+                        v
+             Vector Rendering Engine
+                        |
+                        v
+                 Artistic Output
+```
+
+---
+
+## Stream A: Semantic Processing
+
+### Purpose
+Defines the artistic appearance of the scene.
+
+### Inputs
+- RGB video frames
+- Downscaled resolution (320×240)
+
+### Operations
+- Neural Style Transfer
+- Texture generation
+- Color palette extraction
+
+### Technologies
+- ONNX Runtime
+- Quantized INT8 Models
+- Feed-Forward Style Networks
+
+### Output
+A stylized texture map used by the rendering engine.
+
+---
+
+## Stream B: Geometric Processing
+
+### Purpose
+Captures motion and scene structure.
+
+### Inputs
+- Current frame
+- Previous frame
+
+### Operations
+- Dense Optical Flow
+- Sobel Edge Detection
+- Saliency Segmentation
+
+### Output
+A geometric control matrix containing:
+
+- Motion vectors
+- Edge directions
+- Saliency masks
+
+---
+
+## Tensor Fusion Layer
+
+The rendering engine combines outputs from both streams.
+
+Each virtual brushstroke is represented as:
+
+```math
+S = {x, y, l, θ, c, v}
+```
+
+Where:
+
+| Symbol | Description |
+|----------|-------------|
+| x,y | Stroke position |
+| l | Stroke length |
+| θ | Stroke orientation |
+| c | RGB color |
+| v | Motion velocity |
+
+The resulting brushstrokes are dynamically updated and rendered onto the digital canvas.
+
+---
+
+## Core Algorithms
+
+### 1. Neural Style Transfer
+
+- Feed-forward residual network
+- Instance normalization
+- ONNX INT8 quantization
+- Real-time inference
+
+### Performance Target
+
+| Metric | Target |
+|----------|---------|
+| Inference Latency | ≤ 20 ms |
+| Maximum Latency | 30 ms |
+
+---
+
+### 2. Dense Optical Flow
+
+Used to simulate wet paint motion.
+
+#### Particle Update Equation
+
+```math
+x(t+1) = x(t) + αu
+y(t+1) = y(t) + αv
+```
+
+Where:
+
+- α = fluid viscosity coefficient
+- u,v = optical flow velocity
+
+#### Algorithm
+
+- Farneback Dense Optical Flow
+- Motion vector estimation
+- Paint advection simulation
+
+---
+
+### 3. Saliency-Based Brush Assignment
+
+Foreground objects receive finer detail than the background.
+
+#### Rule
+
+```text
+If M(x,y) >= threshold:
+    Fine Brush
+Else:
+    Coarse Brush
+```
+
+#### Benefits
+
+- Better visual quality
+- Reduced computational cost
+- Improved rendering efficiency
+
+---
+
+### 4. Edge-Aware Stroke Orientation
+
+Brushes align with scene contours.
+
+#### Sobel Gradient Computation
+
+```math
+G = √(Gx² + Gy²)
+```
+
+```math
+ϕ = atan2(Gy, Gx)
+```
+
+Stroke orientation:
+
+```math
+θ = ϕ + π/2
+```
+
+This ensures strokes follow object boundaries naturally.
+
+---
+
+## Technology Stack
+
+### Programming Language
+
+- Python 3.10+
+
+### Computer Vision
+
+- OpenCV
+
+### Scientific Computing
+
+- NumPy
+- SciPy
+
+### AI Inference
+
+- ONNX Runtime
+
+### Segmentation
+
+- MediaPipe Selfie Segmentation
+- OpenCV MOG2
+
+### UI
+
+- OpenCV HighGUI
+- Tkinter
+
+---
+
+## Performance Targets
+
+| Metric | Target |
+|----------|---------|
+| FPS | ≥ 30 |
+| End-to-End Latency | ≤ 33.3 ms |
+| Stream A Latency | ≤ 20 ms |
+| Stream B Latency | ≤ 8 ms |
+| RAM Usage | ≤ 750 MB |
+
+### Target Hardware
+
+- Intel Core i5
+- AMD Ryzen 5
+- 4 CPU cores
+- No dedicated GPU required
+
+---
+
+## Optimization Strategies
+
+### Image Downsampling
+
+```text
+640×480 → 320×240
+```
+
+Reduces neural inference workload significantly.
+
+### Vectorized Processing
+
+Avoid Python loops.
+
+Example:
+
+```python
+positions += velocity_field[
+    positions[:,1],
+    positions[:,0]
+] * alpha
+```
+
+### Memory Pooling
+
+- Pre-allocated arrays
+- Reduced garbage collection
+- Stable frame timing
+
+---
+
+## User Interface
+
+### Main Components
+
+#### Primary Canvas View
+Displays the real-time artistic output.
+
+#### Style Selector
+Choose artistic themes:
+
+- Starry Night
+- The Scream
+- Modernist Geometric
+
+#### Diagnostic Views
+
+- Optical Flow Visualization
+- Sobel Edge Maps
+- Saliency Masks
+
+#### Telemetry Panel
+
+Displays:
+
+- FPS
+- Inference latency
+- CV processing time
+- Memory usage
+
+---
+
+## Risk Management
+
+### Neural Inference Bottlenecks
+
+**Risk**
+- Slow CPUs may reduce frame rate.
+
+**Solution**
+- Asynchronous style generation
+- Independent rendering pipeline
+- Frame-dropping decoupler
+
+---
+
+### Optical Flow Drift
+
+**Risk**
+- Accumulated motion errors.
+
+**Solution**
+- Particle TTL system
+- Periodic coordinate resets
+- Saliency-based reseeding
+
+---
+
+### Lighting Variations
+
+**Risk**
+- Poor illumination affects edge detection.
+
+**Solution**
+- CLAHE preprocessing
+- Adaptive luminance correction
+- Noise stabilization
+
+---
+
+## Educational Outcomes
+
+This project demonstrates:
+
+- Advanced Computer Vision
+- Real-Time Graphics Rendering
+- Neural Network Optimization
+- Multi-Threaded Systems Design
+- Linear Algebra Applications
+- Digital Signal Processing
+- Edge AI Deployment
+
+---
+
+## Future Enhancements
+
+- GPU acceleration
+- Multi-style blending
+- Gesture-controlled painting
+- AR integration
+- Distributed rendering
+- Custom style training
+
+---
+
+## License
+
+This project is developed for academic and educational purposes.
+
+## Authors
+
+**Senior Product Manager & Lead Systems Architect**
+
+Project: **The Living Canvas – Real-Time Generative Video-to-Vector Art Pipeline**
