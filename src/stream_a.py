@@ -72,8 +72,14 @@ class StreamA(threading.Thread):
                     # 1. Preprocess
                     # Convert BGR (OpenCV default) to RGB
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    # Resize to downscaled resolution
-                    resized = cv2.resize(rgb_frame, (config.PROCESSING_WIDTH, config.PROCESSING_HEIGHT))
+                    
+                    # Query model input dimensions dynamically (expected format is [batch, channels, height, width])
+                    input_shape = self.session.get_inputs()[0].shape
+                    model_h = input_shape[2] if (len(input_shape) > 2 and isinstance(input_shape[2], int)) else 224
+                    model_w = input_shape[3] if (len(input_shape) > 3 and isinstance(input_shape[3], int)) else 224
+                    
+                    # Resize to model expected input size (OpenCV takes (width, height))
+                    resized = cv2.resize(rgb_frame, (model_w, model_h))
                     # Convert to float32 [H, W, C] in range [0, 255]
                     in_data = resized.astype(np.float32)
                     # Transpose to channel-first [C, H, W] and expand batch size -> [1, C, H, W]

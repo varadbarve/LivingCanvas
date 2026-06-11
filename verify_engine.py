@@ -24,18 +24,29 @@ def run_tests():
         assert session is not None, f"Failed to load ONNX session for {style}"
         print(f"  Successfully loaded '{style}'")
         
-    # 2. Test Stream A Pre/Post-processing logic
-    print("2. Testing Stream A pre/post-processing logic...")
+    # 2. Test Stream A Pre/Post-processing logic and Inference
+    print("2. Testing Stream A pre/post-processing logic and ONNX inference...")
     dummy_frame = np.random.randint(0, 255, (config.CAMERA_HEIGHT, config.CAMERA_WIDTH, 3), dtype=np.uint8)
     
     # Preprocess
+    session = model_manager.load_style_model("Starry Night")
+    input_shape = session.get_inputs()[0].shape
+    model_h = input_shape[2] if (len(input_shape) > 2 and isinstance(input_shape[2], int)) else 224
+    model_w = input_shape[3] if (len(input_shape) > 3 and isinstance(input_shape[3], int)) else 224
+    
     rgb_frame = cv2.cvtColor(dummy_frame, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(rgb_frame, (config.PROCESSING_WIDTH, config.PROCESSING_HEIGHT))
+    resized = cv2.resize(rgb_frame, (model_w, model_h))
     in_data = resized.astype(np.float32)
     in_tensor = np.transpose(in_data, (2, 0, 1))
     in_tensor = np.expand_dims(in_tensor, axis=0)
-    assert in_tensor.shape == (1, 3, config.PROCESSING_HEIGHT, config.PROCESSING_WIDTH), "Input shape mismatch"
+    assert in_tensor.shape == (1, 3, model_h, model_w), "Input shape mismatch"
     print("  Pre-processing shape correct:", in_tensor.shape)
+    
+    # Run test inference
+    model_inputs = {session.get_inputs()[0].name: in_tensor}
+    model_outputs = session.run(None, model_inputs)
+    assert len(model_outputs) > 0, "No outputs from ONNX run"
+    print("  ONNX model run test passed successfully.")
 
     # 3. Test Engine Initialization and Reseeding
     print("3. Testing Rendering Engine and Particle updates...")
