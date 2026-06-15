@@ -26,11 +26,17 @@ class VectorRenderingEngine:
         # Accumulator canvas
         self.canvas = np.ones((config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), dtype=np.uint8) * 255
         self.white_background = np.ones((config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), dtype=np.uint8) * 255
+        # Dark background for styles like The Scream
+        self.dark_background = np.ones((config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), dtype=np.uint8) * 15
         
         # Simulation parameters (controlled via UI sliders)
         self.alpha = config.DEFAULT_ALPHA
         self.edge_influence = config.DEFAULT_EDGE_INFLUENCE
         self.fade_rate = 0.08  # Accumulation fade rate for paint persistence
+        
+        # Pre-compute saliency gradient maps for attraction force
+        self._saliency_gx = None
+        self._saliency_gy = None
         
         # Initialize particles randomly across the screen
         self.reseed_all()
@@ -107,17 +113,50 @@ class VectorRenderingEngine:
         # Define the subset of active particles
         active = np.arange(self.num_particles)
         
-        # 1. Coordinate Clipping for Indexing
+        # 1. Coordinate Clipping for Indexing (pre-advection)
         x_idx = np.clip(self.x[active].astype(np.int32), 0, config.RENDER_WIDTH - 1)
         y_idx = np.clip(self.y[active].astype(np.int32), 0, config.RENDER_HEIGHT - 1)
         
-        # 2. Viscous Advection (Optical Flow)
+        # 2. Viscous Advection (Optical Flow) with magnitude clamping
         u = flow[y_idx, x_idx, 0]
         v = flow[y_idx, x_idx, 1]
-        self.x[active] += self.alpha * u
-        self.y[active] += self.alpha * v
         
-        # 3. Edge Alignment
+        # Clamp flow magnitude to prevent particle teleportation
+        flow_mag = np.sqrt(u**2 + v**2) + 1e-6
+        max_displacement = 5.0  # Max pixels per frame
+        scale = np.minimum(1.0, max_displacement / flow_mag)
+        u_clamped = u * scale
+        v_clamped = v * scale
+        
+        self.x[active] += self.alpha * u_clamped
+        self.y[active] += self.alpha * v_clamped
+        
+        # 3. Saliency Attraction Force
+        # Compute saliency gradient to nudge particles toward high-saliency regions
+        if self._saliency_gx is None or self._saliency_gx.shape != saliency.shape:
+            self._saliency_gx = np.zeros_like(saliency)
+            self._saliency_gy = np.zeros_like(saliency)
+        
+        # Compute gradient of saliency map (points toward increasing saliency)
+        self._saliency_gx = cv2.Sobel(saliency, cv2.CV_32F, 1, 0, ksize=5)
+        self._saliency_gy = cv2.Sobel(saliency, cv2.CV_32F, 0, 1, ksize=5)
+        
+        # Re-index after advection for attraction sampling
+        x_post = np.clip(self.x[active].astype(np.int32), 0, config.RENDER_WIDTH - 1)
+        y_post = np.clip(self.y[active].astype(np.int32), 0, config.RENDER_HEIGHT - 1)
+        
+        # Apply gentle attraction toward salient regions (strength = 0.3)
+        attraction_strength = 0.3
+        sgx = self._saliency_gx[y_post, x_post]
+        sgy = self._saliency_gy[y_post, x_post]
+        self.x[active] += attraction_strength * sgx
+        self.y[active] += attraction_strength * sgy
+        
+        # 4. Re-clip coordinates after all position updates
+        x_idx = np.clip(self.x[active].astype(np.int32), 0, config.RENDER_WIDTH - 1)
+        y_idx = np.clip(self.y[active].astype(np.int32), 0, config.RENDER_HEIGHT - 1)
+        
+        # 5. Edge Alignment
         # Orientation perpendicular to gradient (Sobel angle + pi/2)
         target_angle = edge_angle[y_idx, x_idx] + np.pi/2
         mag = edge_mag[y_idx, x_idx]
@@ -126,7 +165,7 @@ class VectorRenderingEngine:
         d_theta = (target_angle - self.angle[active] + np.pi) % (2 * np.pi) - np.pi
         self.angle[active] += self.edge_influence * mag * d_theta
         
-        # 4. Saliency-Based Brush Sizing
+        # 6. Saliency-Based Brush Sizing
         sal = saliency[y_idx, x_idx]
         is_foreground = sal >= config.SALIENCY_THRESHOLD
         
@@ -140,17 +179,17 @@ class VectorRenderingEngine:
             self.thickness[active] = np.where(is_foreground, 1.0, 1.5)
             self.length[active] = np.where(is_foreground, 6.0, 15.0)
         elif self.current_style == "Starry Night":
-            # Short, stubby impasto strokes
-            self.thickness[active] = np.where(is_foreground, 6, 12)
-            self.length[active] = np.where(is_foreground, 12, 22)
+            # Tighter impasto strokes — finer in foreground for detail preservation
+            self.thickness[active] = np.where(is_foreground, 3, 8)
+            self.length[active] = np.where(is_foreground, 7, 16)
         elif self.current_style == "The Scream":
             # Long flowing lines
-            self.thickness[active] = np.where(is_foreground, 4, 8)
-            self.length[active] = np.where(is_foreground, 25, 45)
+            self.thickness[active] = np.where(is_foreground, 3, 6)
+            self.length[active] = np.where(is_foreground, 18, 35)
         elif self.current_style == "Modernist Geometric":
             # Geometric shapes
-            self.thickness[active] = np.where(is_foreground, 8, 20)
-            self.length[active] = np.where(is_foreground, 12, 30)
+            self.thickness[active] = np.where(is_foreground, 6, 16)
+            self.length[active] = np.where(is_foreground, 10, 24)
         else:
             self.thickness[active] = np.where(is_foreground, config.BRUSH_FINE_SIZE, config.BRUSH_COARSE_SIZE)
             self.length[active] = np.where(is_foreground, config.BRUSH_FINE_LENGTH, config.BRUSH_COARSE_LENGTH)
@@ -162,27 +201,22 @@ class VectorRenderingEngine:
         elif self.current_style == "Line Drawing":
             self.thickness[active] = np.clip(self.thickness[active], 0.5, 3)
         elif self.current_style == "Starry Night":
-            self.thickness[active] = np.clip(self.thickness[active], 3, 20)
-        elif self.current_style == "The Scream":
             self.thickness[active] = np.clip(self.thickness[active], 2, 14)
+        elif self.current_style == "The Scream":
+            self.thickness[active] = np.clip(self.thickness[active], 1, 10)
         else:
-            self.thickness[active] = np.clip(self.thickness[active], 1, 30)
+            self.thickness[active] = np.clip(self.thickness[active], 1, 24)
             
-        # 5. Color Sampling
+        # 7. Color Sampling — AFTER advection so particles carry the color of where they ARE
         if self.current_style == "Line Drawing":
-            # Ink / graphite color: draw charcoal gray lines only where there is significant edge activity
-            # Rest of the canvas remains white (non-edge particles are hidden by setting thickness/color to white or zero thickness)
+            # Vectorized: ink/graphite color with edge-based thickness
             self.color[active] = [30, 30, 30]
-            # Zero-out thickness for non-edge regions to sketch only outlines
-            for i in active:
-                mag_val = edge_mag[y_idx[i], x_idx[i]]
-                if mag_val < 0.15:
-                    self.thickness[i] = 0
-                else:
-                    self.thickness[i] = 1.0 + mag_val * 1.5
+            mag_vals = edge_mag[y_idx, x_idx]
+            low_edge = mag_vals < 0.15
+            self.thickness[active] = np.where(low_edge, 0, 1.0 + mag_vals * 1.5)
         else:
             if stylized_texture is not None:
-                # Sample RGB color from the stylized Stream A texture
+                # Sample RGB color from the stylized Stream A texture at CURRENT position
                 self.color[active] = stylized_texture[y_idx, x_idx]
             elif "color" in control_matrices:
                 # Fallback to the original camera feed colors (resized)
@@ -216,7 +250,7 @@ class VectorRenderingEngine:
                 colors = np.where(colors > mean_color, np.clip(colors * 1.3, 0, 255), colors * 0.7)
                 self.color[active] = colors.astype(np.uint8)
             
-        # 6. Age Increment & Reseeding
+        # 8. Age Increment & Reseeding
         self.age[active] += 1
         
         # Find dead particles: either aged out or moved out of bounds
@@ -232,9 +266,11 @@ class VectorRenderingEngine:
         self._reseed_indices(dead_indices, saliency)
         
     def draw(self):
-        """Render virtual brushstrokes onto the canvas accumulator."""
+        """Render virtual brushstrokes onto the canvas accumulator using batched drawing."""
+        style = self.current_style if hasattr(self, "current_style") else "Starry Night"
+        
         # 1. Handle ASCII Character Vision separately (no particle drawing)
-        if hasattr(self, "current_style") and self.current_style == "ASCII Character Vision":
+        if style == "ASCII Character Vision":
             ascii_canvas = np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), dtype=np.uint8)
             
             # Select source image
@@ -272,12 +308,41 @@ class VectorRenderingEngine:
                     )
             return ascii_canvas
 
-        # 2. Fade canvas slightly towards white to create wet paint smearing
+        # 2. Handle Cartoon style — render the filtered image directly (no particles)
+        if style == "Cartoon":
+            if hasattr(self, "last_stylized_texture") and self.last_stylized_texture is not None:
+                cartoon_frame = self.last_stylized_texture.copy()
+                
+                # Enhance edges with thick black outlines for that classic cartoon look
+                if hasattr(self, "last_control_matrices") and self.last_control_matrices is not None:
+                    edge_mag = self.last_control_matrices["edge_magnitude"]
+                    # Create strong black edge overlay
+                    edge_mask = (edge_mag > 0.25).astype(np.uint8) * 255
+                    # Dilate edges slightly for bolder outlines
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+                    edge_mask = cv2.dilate(edge_mask, kernel, iterations=1)
+                    # Darken edges on the cartoon frame
+                    edge_3ch = cv2.cvtColor(edge_mask, cv2.COLOR_GRAY2BGR)
+                    cartoon_frame = np.where(edge_3ch > 0, 
+                                           np.clip(cartoon_frame.astype(np.int16) - 180, 0, 255).astype(np.uint8),
+                                           cartoon_frame)
+                
+                return cartoon_frame
+            else:
+                return self.canvas
+
+        # 3. Fade canvas — use dark background for intense styles, white for others
         fade_rate = self.fade_rate
-        if hasattr(self, "current_style") and self.current_style == "Line Drawing":
+        if style == "Line Drawing":
             fade_rate = 0.02  # Slower fade so pencil sketch details accumulate beautifully
-            
-        self.canvas = cv2.addWeighted(self.canvas, 1.0 - fade_rate, self.white_background, fade_rate, 0)
+        elif style == "The Scream":
+            fade_rate = 0.04  # Slower fade for moody paint accumulation
+        
+        if style == "The Scream":
+            # Fade toward dark canvas for The Scream's moody atmosphere
+            self.canvas = cv2.addWeighted(self.canvas, 1.0 - fade_rate, self.dark_background, fade_rate, 0)
+        else:
+            self.canvas = cv2.addWeighted(self.canvas, 1.0 - fade_rate, self.white_background, fade_rate, 0)
         
         # 3. Vectorized math for stroke endpoints (FPS Optimization)
         num_p = self.num_particles
@@ -297,14 +362,81 @@ class VectorRenderingEngine:
         x1s = np.clip((xs + lengths * cos_vals).astype(np.int32), 0, config.RENDER_WIDTH - 1)
         y1s = np.clip((ys + lengths * sin_vals).astype(np.int32), 0, config.RENDER_HEIGHT - 1)
         
-        # 4. Draw brush strokes for active particles
-        for i in range(num_p):
+        # 4. Draw brush strokes — use batched drawing for simple styles, per-particle for complex
+        style = self.current_style if hasattr(self, "current_style") else "Starry Night"
+        
+        # Filter out zero-thickness particles
+        valid_mask = thicknesses > 0
+        if not np.any(valid_mask):
+            return self.canvas
+        
+        if style in ("Starry Night", "The Scream", "Modernist Geometric", "Oil Pastel Painting"):
+            # Complex styles need per-particle drawing but we skip invalid particles early
+            valid_indices = np.where(valid_mask)[0]
+            self._draw_complex_style(style, valid_indices, x0s, y0s, x1s, y1s, 
+                                      cos_vals, sin_vals, lengths, thicknesses, colors)
+        else:
+            # Simple line styles (Line Drawing, default) — use batched color-bucketed drawing
+            self._draw_batched(valid_mask, x0s, y0s, x1s, y1s, thicknesses, colors, style)
+        
+        return self.canvas
+
+    def _draw_batched(self, valid_mask, x0s, y0s, x1s, y1s, thicknesses, colors, style):
+        """Batch draw particles by quantizing colors into buckets for cv2.polylines."""
+        valid_idx = np.where(valid_mask)[0]
+        if len(valid_idx) == 0:
+            return
+            
+        # Quantize colors to reduce unique values (shift right 4 bits = 16 levels per channel)
+        quantized = colors[valid_idx] >> 4
+        
+        # Group by (quantized_color, thickness_int) tuple
+        thick_int = thicknesses[valid_idx].astype(np.int32)
+        thick_int = np.clip(thick_int, 1, 30)
+        
+        # Build a hash key for grouping: encode as single int
+        keys = (quantized[:, 0].astype(np.int64) * 17 * 17 * 31 + 
+                quantized[:, 1].astype(np.int64) * 17 * 31 + 
+                quantized[:, 2].astype(np.int64) * 31 + 
+                thick_int.astype(np.int64))
+        
+        unique_keys = np.unique(keys)
+        
+        for key in unique_keys:
+            mask = keys == key
+            batch_idx = valid_idx[mask]
+            
+            if len(batch_idx) == 0:
+                continue
+            
+            # Get representative color (mean of the group, or just first element)
+            rep_color = tuple(int(c) for c in colors[batch_idx[0]])
+            rep_thick = int(thicknesses[batch_idx[0]])
+            if rep_thick <= 0:
+                rep_thick = 1
+            
+            # Build line segments as polylines: each segment is [pt0, pt1]
+            # For disconnected segments we draw each as a 2-point polyline
+            segments = []
+            for i in batch_idx:
+                segments.append(np.array([[x0s[i], y0s[i]], [x1s[i], y1s[i]]], dtype=np.int32))
+            
+            if style == "Line Drawing":
+                cv2.polylines(self.canvas, segments, isClosed=False, color=(30, 30, 30), 
+                             thickness=rep_thick, lineType=cv2.LINE_AA)
+            else:
+                cv2.polylines(self.canvas, segments, isClosed=False, color=rep_color, 
+                             thickness=rep_thick, lineType=cv2.LINE_AA)
+
+    def _draw_complex_style(self, style, valid_indices, x0s, y0s, x1s, y1s, 
+                            cos_vals, sin_vals, lengths, thicknesses, colors):
+        """Per-particle drawing for styles that require complex geometry."""
+        for i in valid_indices:
             thickness = int(thicknesses[i])
             if thickness <= 0:
                 continue
                 
             color = tuple(int(c) for c in colors[i])  # BGR order
-            style = self.current_style if hasattr(self, "current_style") else "Starry Night"
             
             if style == "Starry Night":
                 # Draw thick, curved impasto swirl stroke (Vincent van Gogh style)
@@ -315,14 +447,14 @@ class VectorRenderingEngine:
                 cv2.line(self.canvas, (xm, ym), (x1s[i], y1s[i]), color, thickness, lineType=cv2.LINE_AA)
                 
             elif style == "The Scream":
-                # Draw wavy flowing line (Edvard Munch style)
-                num_steps = 3
+                # Draw wavy flowing line (Edvard Munch style) — more steps for smoother waves
+                num_steps = 5
                 prev_pt = (x0s[i], y0s[i])
                 for step in range(1, num_steps + 1):
                     t = step / num_steps
                     xl = x0s[i] + t * lengths[i] * cos_vals[i]
                     yl = y0s[i] + t * lengths[i] * sin_vals[i]
-                    wave_offset = 3.5 * np.sin(t * np.pi * 1.5)
+                    wave_offset = 5.0 * np.sin(t * np.pi * 2.0)
                     xp = int(xl - wave_offset * sin_vals[i])
                     yp = int(yl + wave_offset * cos_vals[i])
                     
@@ -356,8 +488,7 @@ class VectorRenderingEngine:
                     cv2.fillPoly(self.canvas, [pts], color)
                     
             elif style == "Cartoon":
-                # Cel-shaded stroke: thick black outline with colored core
-                cv2.line(self.canvas, (x0s[i], y0s[i]), (x1s[i], y1s[i]), (0, 0, 0), thickness + 2, lineType=cv2.LINE_AA)
+                # Cartoon is handled by direct rendering above, this is a fallback
                 cv2.line(self.canvas, (x0s[i], y0s[i]), (x1s[i], y1s[i]), color, thickness, lineType=cv2.LINE_AA)
                 
             elif style == "Oil Pastel Painting":
@@ -370,14 +501,3 @@ class VectorRenderingEngine:
                 offset_x = int(np.random.randint(-2, 3))
                 offset_y = int(np.random.randint(-2, 3))
                 cv2.line(self.canvas, (x0s[i] + offset_x, y0s[i] + offset_y), (x1s[i] + offset_x, y1s[i] + offset_y), color, max(1, thickness - 2), lineType=cv2.LINE_AA)
-                
-            elif style == "Line Drawing":
-                # Multiple sketchy pencil outlines (fine graphite)
-                cv2.line(self.canvas, (x0s[i], y0s[i]), (x1s[i], y1s[i]), (30, 30, 30), thickness, lineType=cv2.LINE_AA)
-                cv2.line(self.canvas, (x0s[i] + 1, y0s[i] - 1), (x1s[i] + 1, y1s[i] - 1), (60, 60, 60), 1, lineType=cv2.LINE_AA)
-                
-            else:
-                # Default clean line stroke
-                cv2.line(self.canvas, (x0s[i], y0s[i]), (x1s[i], y1s[i]), color, thickness, lineType=cv2.LINE_AA)
-            
-        return self.canvas

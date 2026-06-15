@@ -53,20 +53,20 @@ FLOW_FLAGS = 0
 SALIENCY_THRESHOLD = 0.5  # Foreground threshold for MediaPipe Selfie Segmentation
 
 # Vector Rendering Engine Defaults
-DEFAULT_PARTICLE_COUNT = 1500
+DEFAULT_PARTICLE_COUNT = 1200
 MAX_PARTICLE_COUNT = 4000
-MIN_PARTICLE_COUNT = 500
+MIN_PARTICLE_COUNT = 300
 
-DEFAULT_ALPHA = 1.5       # Paint viscosity/advection multiplier
+DEFAULT_ALPHA = 0.8       # Paint viscosity/advection multiplier (lower = tighter to source)
 MIN_ALPHA = 0.1
-MAX_ALPHA = 5.0
+MAX_ALPHA = 3.0
 
-PARTICLE_MIN_TTL = 30     # Minimum lifetime in frames
-PARTICLE_MAX_TTL = 100    # Maximum lifetime in frames
+PARTICLE_MIN_TTL = 20     # Minimum lifetime in frames
+PARTICLE_MAX_TTL = 60     # Maximum lifetime in frames (shorter = faster color refresh)
 
 # Brush stroke styling parameters
-BRUSH_COARSE_SIZE = 14
-BRUSH_FINE_SIZE = 5
+BRUSH_COARSE_SIZE = 10
+BRUSH_FINE_SIZE = 3
 
 BRUSH_COARSE_LENGTH = 25
 BRUSH_FINE_LENGTH = 8

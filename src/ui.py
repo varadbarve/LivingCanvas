@@ -26,6 +26,10 @@ class LivingCanvasUI:
         self.edge_influence_val = tk.DoubleVar(value=config.DEFAULT_EDGE_INFLUENCE)
         self.fade_rate_val = tk.DoubleVar(value=0.08)
         
+        # Cached canvas image item for efficient redraws
+        self._canvas_image_id = None
+        self.photo = None
+        
         # Configure root window styles
         self.root.title("The Living Canvas - Interactive Generative Vector Art")
         self.root.geometry("1150x660")
@@ -221,7 +225,10 @@ class LivingCanvasUI:
             rgb_img = cv2.cvtColor(render_img, cv2.COLOR_BGR2RGB)
             pil_img = PIL.Image.fromarray(rgb_img)
             self.photo = PIL.ImageTk.PhotoImage(image=pil_img)
-            self.canvas_widget.create_image(0, 0, image=self.photo, anchor=tk.NW)
+            if self._canvas_image_id is None:
+                self._canvas_image_id = self.canvas_widget.create_image(0, 0, image=self.photo, anchor=tk.NW)
+            else:
+                self.canvas_widget.itemconfig(self._canvas_image_id, image=self.photo)
             
         # 4. Update Telemetry Panel
         fps = self.dashboard.tick_fps()

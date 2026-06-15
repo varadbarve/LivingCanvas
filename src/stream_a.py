@@ -84,11 +84,16 @@ class StreamA(threading.Thread):
                         
                         # Resize to model expected input size (OpenCV takes (width, height))
                         resized = cv2.resize(rgb_frame, (model_w, model_h))
-                        # Convert to float32 [H, W, C] in range [0, 255]
+                        # Convert to float [H, W, C] in range [0, 255]
                         in_data = resized.astype(np.float32)
                         # Transpose to channel-first [C, H, W] and expand batch size -> [1, C, H, W]
                         in_tensor = np.transpose(in_data, (2, 0, 1))
                         in_tensor = np.expand_dims(in_tensor, axis=0)
+                        
+                        # Auto-detect model expected dtype (some models expect float16)
+                        expected_type = self.session.get_inputs()[0].type
+                        if 'float16' in expected_type or 'float16' in str(expected_type):
+                            in_tensor = in_tensor.astype(np.float16)
                         
                         # 2. ONNX Run
                         model_inputs = {self.session.get_inputs()[0].name: in_tensor}
@@ -98,6 +103,9 @@ class StreamA(threading.Thread):
                         # 3. Postprocess
                         # Output shape is [1, 3, H, W]
                         out_tensor = np.squeeze(out_tensor, axis=0)
+                        # Ensure float32 for post-processing (some models output float16)
+                        if out_tensor.dtype != np.float32:
+                            out_tensor = out_tensor.astype(np.float32)
                         out_tensor = np.transpose(out_tensor, (1, 2, 0))
                         # Clip values to [0, 255] and cast to uint8
                         out_tensor = np.clip(out_tensor, 0, 255).astype(np.uint8)
