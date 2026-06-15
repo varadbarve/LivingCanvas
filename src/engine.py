@@ -331,11 +331,70 @@ class VectorRenderingEngine:
             else:
                 return self.canvas
 
-        # 3. Fade canvas — use dark background for intense styles, white for others
-        fade_rate = self.fade_rate
+        # 3. Handle Line Drawing style — clean outlines only (no particles)
         if style == "Line Drawing":
-            fade_rate = 0.02  # Slower fade so pencil sketch details accumulate beautifully
-        elif style == "The Scream":
+            if hasattr(self, "last_control_matrices") and self.last_control_matrices is not None:
+                # Use the full-resolution color frame for better detail than the upscaled gray
+                if "color" in self.last_control_matrices:
+                    color_frame = self.last_control_matrices["color"]
+                    gray = cv2.cvtColor(color_frame, cv2.COLOR_BGR2GRAY)
+                else:
+                    gray = self.last_control_matrices["gray"]
+                    if len(gray.shape) == 3:
+                        gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
+                gray = gray.astype(np.uint8)
+                
+                # Apply CLAHE to boost contrast in subtle facial features
+                clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+                gray_enhanced = clahe.apply(gray)
+                
+                # Light blur to reduce noise while preserving edges
+                gray_smooth = cv2.GaussianBlur(gray_enhanced, (3, 3), 0)
+                
+                # --- Layer 1: Fine Canny edges (facial features — eyes, nose, lips) ---
+                median_val = np.median(gray_smooth)
+                canny_fine = cv2.Canny(gray_smooth, 
+                                       int(max(0, 0.3 * median_val)), 
+                                       int(min(255, 0.85 * median_val)))
+                
+                # --- Layer 2: Coarse Canny edges (body outlines, hair, clothing) ---
+                canny_coarse = cv2.Canny(gray_smooth, 
+                                          int(max(0, 0.15 * median_val)), 
+                                          int(min(255, 0.6 * median_val)))
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+                canny_coarse = cv2.dilate(canny_coarse, kernel, iterations=1)
+                
+                # --- Layer 3: Adaptive threshold for fine detail Canny misses ---
+                # This catches subtle gradients in facial features
+                adaptive = cv2.adaptiveThreshold(
+                    gray_smooth, 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV,
+                    blockSize=11, C=4
+                )
+                # Thin out the adaptive lines to avoid noise
+                adaptive_thin = cv2.erode(adaptive, kernel, iterations=1)
+                
+                # Combine all edge layers
+                edges_combined = cv2.bitwise_or(canny_fine, canny_coarse)
+                edges_combined = cv2.bitwise_or(edges_combined, adaptive_thin)
+                
+                # Invert: black lines on white paper
+                outline = 255 - edges_combined
+                
+                # Warm paper tint (subtle sepia)
+                sketch_bgr = np.zeros((config.RENDER_HEIGHT, config.RENDER_WIDTH, 3), dtype=np.uint8)
+                sketch_bgr[:, :, 0] = np.clip(outline * 0.93, 0, 255).astype(np.uint8)
+                sketch_bgr[:, :, 1] = np.clip(outline * 0.96, 0, 255).astype(np.uint8)
+                sketch_bgr[:, :, 2] = outline
+                
+                return sketch_bgr
+            else:
+                return self.canvas
+
+        # 4. Fade canvas — use dark background for intense styles, white for others
+        fade_rate = self.fade_rate
+        if style == "The Scream":
             fade_rate = 0.04  # Slower fade for moody paint accumulation
         
         if style == "The Scream":
